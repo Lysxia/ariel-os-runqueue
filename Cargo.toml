@@ -6,4 +6,5 @@ rust-version = "1.85"
 description = "Ariel OS runqueue implementation"
 
 [dependencies]
+# The creusot repository must be there...
 creusot-contracts = { path = "../../creusot/creusot-contracts" }
