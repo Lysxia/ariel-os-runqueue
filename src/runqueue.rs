@@ -1,6 +1,7 @@
 // Disable indexing lints for now
 #![allow(clippy::indexing_slicing)]
 
+use creusot_contracts::{DeepModel, macros::*, Seq, OrdLogic};
 use core::mem;
 
 use self::clist::CList;
@@ -26,6 +27,63 @@ impl From<RunqueueId> for usize {
     }
 }
 
+impl DeepModel for RunqueueId {
+    type DeepModelTy = Self;
+    #[logic]
+    #[trusted]
+    fn deep_model(self) -> Self::DeepModelTy {
+        self
+    }
+}
+
+impl OrdLogic for RunqueueId {
+    #[logic]
+    #[trusted]
+    fn cmp_log(self, _: Self) -> core::cmp::Ordering {
+        // TODO
+        core::cmp::Ordering::Equal
+    }
+
+    #[law]
+    #[trusted]
+    fn cmp_lt_log(_:Self, _: Self) {
+    }
+
+    #[law]
+    #[trusted]
+    fn cmp_le_log(_:Self, _: Self) {
+    }
+
+    #[law]
+    #[trusted]
+    fn cmp_ge_log(_:Self, _: Self) {
+    }
+    #[law]
+    #[trusted]
+    fn cmp_gt_log(_:Self, _: Self) {}
+
+    #[law]
+    #[trusted]
+    fn refl(_:Self) {
+    }
+    #[law]
+    #[trusted]
+    fn trans(_:Self, _: Self, _: Self, _: core::cmp::Ordering) {
+    }
+    #[law]
+    #[trusted]
+    fn antisym1(_:Self, _: Self) {
+    }
+    #[law]
+    #[trusted]
+    fn antisym2(_:Self, _: Self) {
+    }
+    #[law]
+    #[trusted]
+    fn eq_cmp(_:Self, _: Self) {
+    }
+}
+
 /// Identifier of a thread.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
@@ -42,6 +100,15 @@ impl ThreadId {
 impl From<ThreadId> for usize {
     fn from(value: ThreadId) -> Self {
         usize::from(value.0)
+    }
+}
+
+impl DeepModel for ThreadId {
+    type DeepModelTy = Self;
+    #[logic]
+    #[trusted]
+    fn deep_model(self) -> Self::DeepModelTy {
+        self
     }
 }
 
@@ -222,7 +289,33 @@ pub struct RunQueueIter<'a, const N_QUEUES: usize, const N_THREADS: usize> {
     bitcache: usize,
 }
 
-impl<const N_QUEUES: usize, const N_THREADS: usize> Iterator
+impl<const N_QUEUES: usize, const N_THREADS: usize> creusot_contracts::Iterator
+    for RunQueueIter<'_, { N_QUEUES }, { N_THREADS }> {
+    #[logic]
+    #[trusted]
+    fn produces(self, produced: Seq<Self::Item>, end: Self) -> bool {
+        false
+    }
+
+    #[logic]
+    #[trusted]
+    fn completed(&mut self) -> bool {
+        false
+    }
+
+    #[law]
+    #[trusted]
+    fn produces_refl(self) {}
+
+    #[law]
+    #[trusted]
+    #[requires(a.produces(ab, b))]
+    #[requires(b.produces(bc, c))]
+    #[ensures(a.produces(ab.concat(bc), c))]
+    fn produces_trans(a: Self, ab: Seq<Self::Item>, b: Self, bc: Seq<Self::Item>, c: Self) {}
+}
+
+impl<const N_QUEUES: usize, const N_THREADS: usize> ::core::iter::Iterator
     for RunQueueIter<'_, { N_QUEUES }, { N_THREADS }>
 {
     type Item = ThreadId;
