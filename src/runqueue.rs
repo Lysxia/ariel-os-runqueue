@@ -1,17 +1,32 @@
 // Disable indexing lints for now
 #![allow(clippy::indexing_slicing)]
 
-use creusot_contracts::{DeepModel, macros::*, Seq, OrdLogic};
+// TODO: replace with `use creusot_contracts::prelude::Default;` (or uncomment `/* Default, */` below)
+// after fixing Creusot's Default derive macro to support private fields,
+// or just replace with handwritten impl Default with some specs.
+use std::default::Default;
 use core::mem;
+use creusot_contracts::{
+    prelude::{Clone, PartialEq, /* Default, */ *},
+    std::iter::IteratorSpec,
+};
 
 use self::clist::CList;
 
 const USIZE_BITS: usize = mem::size_of::<usize>() * 8;
 
 /// Runqueue number.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub struct RunqueueId(u8);
+
+impl Clone for RunqueueId {
+    #[check(ghost)]
+    #[ensures(*self == result)]
+    fn clone(&self) -> Self {
+        Self(self.0)
+    }
+}
 
 impl RunqueueId {
     /// Wraps the given ID as a [`RunqueueId`].
@@ -44,50 +59,50 @@ impl OrdLogic for RunqueueId {
         core::cmp::Ordering::Equal
     }
 
-    #[law]
+    #[logic(law)]
     #[trusted]
-    fn cmp_lt_log(_:Self, _: Self) {
-    }
+    fn cmp_lt_log(_: Self, _: Self) {}
 
-    #[law]
+    #[logic(law)]
     #[trusted]
-    fn cmp_le_log(_:Self, _: Self) {
-    }
+    fn cmp_le_log(_: Self, _: Self) {}
 
-    #[law]
+    #[logic(law)]
     #[trusted]
-    fn cmp_ge_log(_:Self, _: Self) {
-    }
-    #[law]
+    fn cmp_ge_log(_: Self, _: Self) {}
+    #[logic(law)]
     #[trusted]
-    fn cmp_gt_log(_:Self, _: Self) {}
+    fn cmp_gt_log(_: Self, _: Self) {}
 
-    #[law]
+    #[logic(law)]
     #[trusted]
-    fn refl(_:Self) {
-    }
-    #[law]
+    fn refl(_: Self) {}
+    #[logic(law)]
     #[trusted]
-    fn trans(_:Self, _: Self, _: Self, _: core::cmp::Ordering) {
-    }
-    #[law]
+    fn trans(_: Self, _: Self, _: Self, _: core::cmp::Ordering) {}
+    #[logic(law)]
     #[trusted]
-    fn antisym1(_:Self, _: Self) {
-    }
-    #[law]
+    fn antisym1(_: Self, _: Self) {}
+    #[logic(law)]
     #[trusted]
-    fn antisym2(_:Self, _: Self) {
-    }
-    #[law]
+    fn antisym2(_: Self, _: Self) {}
+    #[logic(law)]
     #[trusted]
-    fn eq_cmp(_:Self, _: Self) {
-    }
+    fn eq_cmp(_: Self, _: Self) {}
 }
 
 /// Identifier of a thread.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub struct ThreadId(u8);
+
+impl Clone for ThreadId {
+    #[check(ghost)]
+    #[ensures(*self == result)]
+    fn clone(&self) -> Self {
+        Self(self.0)
+    }
+}
 
 impl ThreadId {
     /// Wraps the given ID as a [`ThreadId`].
@@ -289,8 +304,9 @@ pub struct RunQueueIter<'a, const N_QUEUES: usize, const N_THREADS: usize> {
     bitcache: usize,
 }
 
-impl<const N_QUEUES: usize, const N_THREADS: usize> creusot_contracts::Iterator
-    for RunQueueIter<'_, { N_QUEUES }, { N_THREADS }> {
+impl<const N_QUEUES: usize, const N_THREADS: usize> IteratorSpec
+    for RunQueueIter<'_, { N_QUEUES }, { N_THREADS }>
+{
     #[logic]
     #[trusted]
     fn produces(self, produced: Seq<Self::Item>, end: Self) -> bool {
@@ -303,11 +319,11 @@ impl<const N_QUEUES: usize, const N_THREADS: usize> creusot_contracts::Iterator
         false
     }
 
-    #[law]
+    #[logic(law)]
     #[trusted]
     fn produces_refl(self) {}
 
-    #[law]
+    #[logic(law)]
     #[trusted]
     #[requires(a.produces(ab, b))]
     #[requires(b.produces(bc, c))]
