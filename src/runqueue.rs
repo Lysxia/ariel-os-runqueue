@@ -5,6 +5,7 @@
 // after fixing Creusot's Default derive macro to support private fields,
 // or just replace with handwritten impl Default with some specs.
 use std::default::Default;
+use std::cmp::Ordering;
 use core::mem;
 use creusot_contracts::{
     prelude::{Clone, PartialEq, /* Default, */ *},
@@ -80,42 +81,50 @@ impl model::View for RunqueueId {
 
 impl OrdLogic for RunqueueId {
     #[logic]
-    //#[trusted]
     #[ensures(result == Int::cmp_log(self@, other@))]
     fn cmp_log(self, other: Self) -> core::cmp::Ordering {
         pearlite! { Int::cmp_log(self@, other@) }
     }
 
     #[logic(law)]
-    #[trusted]
-    fn cmp_lt_log(_: Self, _: Self) {}
+    #[ensures(x.lt_log(y) == (x.cmp_log(y) == Ordering::Less))]
+    fn cmp_lt_log(x: Self, y: Self) {}
 
     #[logic(law)]
-    #[trusted]
-    fn cmp_le_log(_: Self, _: Self) {}
+    #[ensures(x.le_log(y) == (x.cmp_log(y) != Ordering::Greater))]
+    fn cmp_le_log(x: Self, y: Self) {}
 
     #[logic(law)]
-    #[trusted]
-    fn cmp_ge_log(_: Self, _: Self) {}
-    #[logic(law)]
-    #[trusted]
-    fn cmp_gt_log(_: Self, _: Self) {}
+    #[ensures(x.ge_log(y) == (x.cmp_log(y) != Ordering::Less))]
+    fn cmp_ge_log(x: Self, y: Self) {}
 
     #[logic(law)]
-    #[trusted]
-    fn refl(_: Self) {}
+    #[ensures(x.gt_log(y) == (x.cmp_log(y) == Ordering::Greater))]
+    fn cmp_gt_log(x: Self, y: Self) {}
+
     #[logic(law)]
-    #[trusted]
-    fn trans(_: Self, _: Self, _: Self, _: core::cmp::Ordering) {}
+    #[ensures(x.cmp_log(x) == Ordering::Equal)]
+    fn refl(x: Self) {}
+
     #[logic(law)]
-    #[trusted]
-    fn antisym1(_: Self, _: Self) {}
+    #[requires(x.cmp_log(y) == o)]
+    #[requires(y.cmp_log(z) == o)]
+    #[ensures(x.cmp_log(z) == o)]
+    fn trans(x: Self, y: Self, z: Self, o: core::cmp::Ordering) {}
+
     #[logic(law)]
-    #[trusted]
-    fn antisym2(_: Self, _: Self) {}
+    #[requires(x.cmp_log(y) == Ordering::Less)]
+    #[ensures(y.cmp_log(x) == Ordering::Greater)]
+    fn antisym1(x: Self, y: Self) {}
+
     #[logic(law)]
-    #[trusted]
-    fn eq_cmp(_: Self, _: Self) {}
+    #[requires(x.cmp_log(y) == Ordering::Greater)]
+    #[ensures(y.cmp_log(x) == Ordering::Less)]
+    fn antisym2(x: Self, y: Self) {}
+
+    #[logic(law)]
+    #[ensures((x == y) == (x.cmp_log(y) == Ordering::Equal))]
+    fn eq_cmp(x: Self, y: Self) {}
 }
 
 /// Identifier of a thread.
@@ -191,7 +200,7 @@ impl<const N_QUEUES: usize, const N_THREADS: usize> Invariant for RunQueue<N_QUE
     #[logic]
     fn invariant(self) -> bool {
         pearlite! {
-            self.bitcache@ < usize::MAX@ 
+            self.bitcache@ < usize::MAX@
                 && self.queues.invariant()
                 && N_QUEUES@ < USIZE_BITS@
                 && valid_cache(self.bitcache, N_QUEUES)
@@ -261,7 +270,7 @@ impl<const N_QUEUES: usize, const N_THREADS: usize> RunQueue<{ N_QUEUES }, { N_T
         self.queues.push(n.0, rq.0);
     }
 
-    /// Returns the head of the runqueue without removing it. 
+    /// Returns the head of the runqueue without removing it.
     pub fn peek_head(&self, rq: RunqueueId) -> Option<ThreadId> {
         self.queues.peek_head(rq.0).map(ThreadId::new)
     }
@@ -285,7 +294,7 @@ impl<const N_QUEUES: usize, const N_THREADS: usize> RunQueue<{ N_QUEUES }, { N_T
         //debug_assert!(usize::from(n) < N_THREADS);  // TODO: WHY DOES IT BREAK ???
         //debug_assert!(usize::from(rq) < N_QUEUES);
         proof_assert!(n@ < N_THREADS@);
-        proof_assert!(rq@ < N_QUEUES@); 
+        proof_assert!(rq@ < N_QUEUES@);
         let popped = self.queues.pop_head(rq.0);
         //
         proof_assert!({
@@ -294,13 +303,13 @@ impl<const N_QUEUES: usize, const N_THREADS: usize> RunQueue<{ N_QUEUES }, { N_T
                 None    => false
             }
         });
-        assert_eq!(popped, Some(n.0));  
+        assert_eq!(popped, Some(n.0));
         if self.queues.is_empty(rq.0) {
             //self.bitcache &= !(1 << rq.0);
             //self.bitcache &= !Self::mask_of_id(rq.0);
             self.unset_bit_rq(rq.0);
         }
-    } 
+    }
 
     #[logic]
     pub fn head(self, rq: RunqueueId) -> Option<u8> {
@@ -340,7 +349,7 @@ impl<const N_QUEUES: usize, const N_THREADS: usize> RunQueue<{ N_QUEUES }, { N_T
         if rq_ffs == 0 {
             return None;
         }
-        let rq = rq_ffs as u8 - 1; 
+        let rq = rq_ffs as u8 - 1;
         self.queues
             .peek_head(rq)
             .map(|id| (ThreadId::new(id), RunqueueId::new(rq)))
@@ -438,7 +447,7 @@ impl<const N_QUEUES: usize, const N_THREADS: usize> RunQueue<{ N_QUEUES }, { N_T
         }
     )]
     fn clear_higher_priorities(&self, bitcache: usize, rq: RunqueueId) -> usize {
-        bitcache % (1 << (rq.0 + 1)) 
+        bitcache % (1 << (rq.0 + 1))
     }
 }
 
@@ -594,7 +603,7 @@ mod clist {
         #[logic(open(super))]
         pub fn valid_rq_id(id: Int) -> bool {
             pearlite! {
-                super::bounded(id, 0, N_QUEUES@)      
+                super::bounded(id, 0, N_QUEUES@)
             }
         }
 
@@ -603,7 +612,7 @@ mod clist {
             pearlite! {
                 super::bounded(id, 0, N_THREADS@)
             }
-        } 
+        }
 
         #[trusted]
         pub const fn new() -> Self {
@@ -713,7 +722,7 @@ mod clist {
                     None
                 } else {
                     Some(self.next_idxs[self.tail[rq as usize] as usize])
-                } 
+                }
             }
         }
 
@@ -733,7 +742,7 @@ mod clist {
 
         pub fn peek_next(&self, curr: u8) -> u8 {
             self.next_idxs[curr as usize]
-        } 
+        }
 
         pub fn advance(&mut self, rq: u8) -> bool {
             let tail = self.tail[rq as usize];
