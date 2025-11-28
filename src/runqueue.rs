@@ -4,22 +4,22 @@
 // TODO: replace with `use creusot_contracts::prelude::Default;` (or uncomment `/* Default, */` below)
 // after fixing Creusot's Default derive macro to support private fields,
 // or just replace with handwritten impl Default with some specs.
-use std::default::Default;
-use std::cmp::Ordering;
 use core::mem;
 use creusot_contracts::{
+    logic::ops::NthBitLogic,
+    model,
     prelude::{Clone, PartialEq, /* Default, */ *},
     std::iter::IteratorSpec,
-    model,
-    logic::ops::NthBitLogic,
 };
+use std::cmp::Ordering;
+use std::default::Default;
 
 use self::clist::CList;
 
 pub const USIZE_BITS: usize = mem::size_of::<usize>() * 8;
 
 /// Runqueue number.
-#[derive(Copy, Debug, PartialEq, Eq, /*PartialOrd, Ord*/)]
+#[derive(Copy, Debug, PartialEq, Eq /*PartialOrd, Ord*/)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub struct RunqueueId(u8);
 
@@ -188,12 +188,17 @@ impl model::View for ThreadId {
 /// The current implementation needs an usize for the bit cache,
 /// an `[u8; N_QUEUES]` array for the list tail indexes
 /// and an `[u8; N_THREADS]` for the list next indexes.
-#[derive(Default)]
 pub struct RunQueue<const N_QUEUES: usize, const N_THREADS: usize> {
     /// Bitcache that represents the currently used queues
     /// in `0..N_QUEUES`.
     bitcache: usize,
     queues: clist::CList<N_QUEUES, N_THREADS>,
+}
+
+impl<const N_QUEUES: usize, const N_THREADS: usize> Default for RunQueue<N_QUEUES, N_THREADS> {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl<const N_QUEUES: usize, const N_THREADS: usize> Invariant for RunQueue<N_QUEUES, N_THREADS> {
@@ -203,6 +208,7 @@ impl<const N_QUEUES: usize, const N_THREADS: usize> Invariant for RunQueue<N_QUE
             self.bitcache@ < usize::MAX@
                 && self.queues.invariant()
                 && N_QUEUES@ < USIZE_BITS@
+                && N_QUEUES@ < 64 && N_THREADS@ < 64
                 && valid_cache(self.bitcache, N_QUEUES)
         }
     }
@@ -217,6 +223,11 @@ impl<const N_QUEUES: usize, const N_THREADS: usize> RunQueue<{ N_QUEUES }, { N_T
     #[logic]
     pub fn valid_th_id(id: Int) -> bool {
         CList::<N_QUEUES, N_THREADS>::valid_th_id(id)
+    }
+
+    #[logic]
+    pub fn valid_rq(&self, id: Int) -> bool {
+        self.queues.valid_rq(id)
     }
 
     #[inline(always)]
@@ -242,6 +253,7 @@ impl<const N_QUEUES: usize, const N_THREADS: usize> RunQueue<{ N_QUEUES }, { N_T
     #[trusted]
     #[bitwise_proof]
     #[requires(Self::valid_rq_id(rq@))]
+    #[ensures(self.valid_rq(rq@) ==> (^self).valid_rq(rq@))]
     fn set_bit_rq(&mut self, rq: u8) {
         self.bitcache |= Self::mask_of_id(rq)
     }
@@ -259,18 +271,21 @@ impl<const N_QUEUES: usize, const N_THREADS: usize> RunQueue<{ N_QUEUES }, { N_T
     }
 
     /// Adds thread with tid `n` to runqueue number `rq`.
-    #[requires(Self::valid_rq_id(rq@))]
+    #[requires(self.valid_rq(rq@))]
     #[requires(Self::valid_th_id(n@))]
     pub fn add(&mut self, n: ThreadId, rq: RunqueueId) {
-        //debug_assert!(usize::from(n) < N_THREADS);
-        //debug_assert!(usize::from(rq) < N_QUEUES);
+        #[cfg(not(creusot))]
+        {
+            debug_assert!(usize::from(n) < N_THREADS);
+            debug_assert!(usize::from(rq) < N_QUEUES);
+        }
         //self.bitcache |= 1 << rq.0;
-        //self.bitcache |= Self::mask_of_id(rq.0);
         self.set_bit_rq(rq.0);
         self.queues.push(n.0, rq.0);
     }
 
     /// Returns the head of the runqueue without removing it.
+    #[requires(Self::valid_rq_id(rq@))]
     pub fn peek_head(&self, rq: RunqueueId) -> Option<ThreadId> {
         self.queues.peek_head(rq.0).map(ThreadId::new)
     }
@@ -283,16 +298,17 @@ impl<const N_QUEUES: usize, const N_THREADS: usize> RunQueue<{ N_QUEUES }, { N_T
     /// This is fine, Ariel OS only ever calls `pop_head()` for the current thread.
     #[requires(Self::valid_rq_id(rq@))]
     #[requires(Self::valid_th_id(n@))]
-    //#[requires(self.check_head(n, rq))]
-    //#[requires(self.head(rq) != None)]
     #[requires(match self.head(rq) {
             Some(i) => i@ == rq@,
             None    => false
         }
     )]
     pub fn pop_head(&mut self, n: ThreadId, rq: RunqueueId) {
-        //debug_assert!(usize::from(n) < N_THREADS);  // TODO: WHY DOES IT BREAK ???
-        //debug_assert!(usize::from(rq) < N_QUEUES);
+        #[cfg(not(creusot))]
+        {
+            debug_assert!(usize::from(n) < N_THREADS);
+            debug_assert!(usize::from(rq) < N_QUEUES)
+        };
         proof_assert!(n@ < N_THREADS@);
         proof_assert!(rq@ < N_QUEUES@);
         let popped = self.queues.pop_head(rq.0);
@@ -303,10 +319,10 @@ impl<const N_QUEUES: usize, const N_THREADS: usize> RunQueue<{ N_QUEUES }, { N_T
                 None    => false
             }
         });
+        #[cfg(not(creusot))]
         assert_eq!(popped, Some(n.0));
         if self.queues.is_empty(rq.0) {
             //self.bitcache &= !(1 << rq.0);
-            //self.bitcache &= !Self::mask_of_id(rq.0);
             self.unset_bit_rq(rq.0);
         }
     }
@@ -321,7 +337,6 @@ impl<const N_QUEUES: usize, const N_THREADS: usize> RunQueue<{ N_QUEUES }, { N_T
     pub fn del(&mut self, n: ThreadId) {
         if let Some(empty_runqueue) = self.queues.del(n.0) {
             //self.bitcache &= !(1 << empty_runqueue);
-            //self.bitcache &= !Self::mask_of_id(empty_runqueue);
             self.unset_bit_rq(empty_runqueue);
         }
     }
@@ -356,17 +371,22 @@ impl<const N_QUEUES: usize, const N_THREADS: usize> RunQueue<{ N_QUEUES }, { N_T
     }
 
     /// Returns the next thread from the runqueue that fulfills the predicate.
-    #[requires(forall<x: &ThreadId> Self::valid_th_id(x@) ==> predicate.precondition((x,), ))]
+    #[trusted]
+    #[requires(forall<x: &ThreadId> predicate.precondition((x,), ))]
     pub fn get_next_filter<F: FnMut(&ThreadId) -> bool>(
         &self,
         mut predicate: F,
     ) -> Option<ThreadId> {
-        let (next, prio) = self.get_next_with_rq()?;
-        if predicate(&next) {
-            return Some(next);
+        //let (next, prio) = self.get_next_with_rq()?;   // broken syntax
+        if let Some((next, prio)) = self.get_next_with_rq() {
+            if predicate(&next) {
+                return Some(next);
+            }
+            // impossible precondition (no spec for find ?)
+            self.iter_from(next, prio).find(predicate)
+        } else {
+            None
         }
-        // impossible precondition (no spec for find ?)
-        self.iter_from(next, prio).find(predicate)
     }
 
     /// Pop the thread that should run next.
@@ -379,14 +399,11 @@ impl<const N_QUEUES: usize, const N_THREADS: usize> RunQueue<{ N_QUEUES }, { N_T
             return None;
         }
         proof_assert!(Self::valid_rq_id(rq_ffs@));
-        //proof_assert!(forall<x: Int> x >= 0 && x < USIZE_BITS@ ==> Self::valid_rq_id(x));
-        //proof_assert!(forall<x: Int> x >= 0 && x < USIZE_BITS@ ==> x < N_QUEUES@);
         let rq = (rq_ffs - 1) as u8;
-        //proof_assert!(Self::valid_rq_id(rq@));
+
         let head = self.queues.pop_head(rq).map(ThreadId::new);
         if self.queues.is_empty(rq) {
             //self.bitcache &= !(1 << rq);
-            //self.bitcache &= !Self::mask_of_id(rq);
             self.unset_bit_rq(rq);
         }
         head
@@ -398,9 +415,10 @@ impl<const N_QUEUES: usize, const N_THREADS: usize> RunQueue<{ N_QUEUES }, { N_T
     ///
     /// Returns `false` if the operation had no effect, i.e. when the runqueue
     /// is empty or only contains a single thread.
-    #[requires(Self::valid_rq_id(rq@))]
+    #[requires(self.valid_rq(rq@))]
     pub fn advance(&mut self, rq: RunqueueId) -> bool {
-        //debug_assert!((usize::from(rq)) < N_QUEUES); // TODO: Pourquoi ça plante ?
+        #[cfg(not(creusot))]
+        debug_assert!((usize::from(rq)) < N_QUEUES);
         proof_assert!(rq@ < N_QUEUES@);
         self.queues.advance(rq.0)
     }
@@ -408,7 +426,8 @@ impl<const N_QUEUES: usize, const N_THREADS: usize> RunQueue<{ N_QUEUES }, { N_T
     /// Checks if a runqueue is empty.
     #[requires(Self::valid_rq_id(rq@))]
     pub fn is_empty(&self, rq: RunqueueId) -> bool {
-        //debug_assert!((rq.0 as usize) < N_QUEUES);
+        #[cfg(not(creusot))]
+        debug_assert!((rq.0 as usize) < N_QUEUES);
         proof_assert!(rq.0@ < N_QUEUES@);
         self.queues.is_empty(rq.0)
     }
@@ -465,7 +484,7 @@ fn leadz(val: usize) -> u32 {
 #[bitwise_proof]
 #[ensures(leadz.postcondition((val,), USIZE_BITS as u32 - result))]
 #[ensures(forall<m: usize> valid_cache(val, m) ==> result < m as u32)]
-#[ensures(val@ != 0 ==> result@ != 0)]
+#[ensures(val@ > 0 ==> result@ > 0)]
 fn ffs(val: usize) -> u32 {
     USIZE_BITS as u32 - leadz(val)
 }
@@ -473,18 +492,16 @@ fn ffs(val: usize) -> u32 {
 #[logic]
 fn valid_cache(bitcache: usize, n_queues: usize) -> bool {
     pearlite! {
-        (bitcache << n_queues) == 0usize
+        (bitcache >> n_queues) == 0usize
     }
 }
 
 #[logic]
-fn bounded(value: Int, min: Int, max: Int) -> bool {
+pub fn bounded(value: Int, min: Int, max: Int) -> bool {
     pearlite! {
         min <= value && value < max
     }
 }
-
-
 
 /// Iterator over threads in a [`RunQueue`].
 ///
@@ -535,18 +552,24 @@ impl<const N_QUEUES: usize, const N_THREADS: usize> ::core::iter::Iterator
                 })]
     fn next(&mut self) -> Option<Self::Item> {
         let mut next = self.queues.peek_next(self.prev);
-        if next == self.rq_head? {
+        if let Some(n) = self.rq_head
+            && n == next
+        {
             // Circled through whole queue, so switch to next one.
             let rq = ffs(self.bitcache) as u8 - 1;
             // Clear current runqueue from bitcache.
-            self.bitcache &= !(1 << rq);
+            //self.bitcache &= !(1 << rq);
+            self.unset_bit_rq(rq);
             // Get head from remaining highest priority runqueue.
             self.rq_head = if self.bitcache > 0 {
+                proof_assert!(valid_cache(self.bitcache, N_QUEUES));
                 self.queues.peek_head(ffs(self.bitcache) as u8 - 1)
             } else {
                 None
             };
             next = self.rq_head?;
+        } else {
+            return None;
         }
         self.prev = next;
         Some(ThreadId(next))
@@ -558,10 +581,25 @@ impl<const N_QUEUES: usize, const N_THREADS: usize> Invariant
 {
     #[logic]
     fn invariant(self) -> bool {
-        match self.rq_head {
-            Some(_) => self.bitcache != 0usize,
-            None    => true
+        pearlite! {
+            valid_cache(self.bitcache, N_QUEUES) &&
+            bounded(self.prev@, 0, N_THREADS@) &&
+            self.prev@ < clist::CList::<N_QUEUES, N_THREADS>::sentinel_log() &&
+            match self.rq_head {
+                Some(i) => self.bitcache != 0usize && bounded(i@, 0, N_THREADS@) && i@ < clist::CList::<N_QUEUES, N_THREADS>::sentinel_log(),
+                    None    => true
+            }
         }
+    }
+}
+
+impl<const N_QUEUES: usize, const N_THREADS: usize> RunQueueIter<'_, N_QUEUES, N_THREADS> {
+    #[inline(always)]
+    #[trusted]
+    #[bitwise_proof]
+    #[requires(bounded(rq@, 0, N_QUEUES@))]
+    fn unset_bit_rq(&mut self, rq: u8) {
+        self.bitcache &= !(RunQueue::<N_QUEUES, N_THREADS>::mask_of_id(rq))
     }
 }
 
@@ -581,11 +619,15 @@ mod clist {
         #[logic(open)]
         fn invariant(self) -> bool {
             pearlite! {
-                self.tail@.len() < N_QUEUES@
-                    && N_QUEUES@ < 64
-                    && self.next_idxs@.len() < N_THREADS@
-                    && forall<i: Int> i >= 0 && i < self.tail@.len() ==> self.tail@[i]@ < N_THREADS@ || self.tail@[i]@ == Self::sentinel_log()
-                    && forall<i: Int> i >= 0 && i < self.next_idxs@.len() ==> self.next_idxs@[i]@ < N_THREADS@ || self.tail@[i]@ == Self::sentinel_log()
+                self.tail@.len() == N_QUEUES@
+                    && self.next_idxs@.len() == N_THREADS@
+                    && N_QUEUES@ < Self::sentinel_log()
+                    && N_THREADS@ < Self::sentinel_log()
+                    && Self::sentinel_log() <= 255
+                    && forall<i: Int> 0 <= i && i < self.tail@.len() && self.tail@[i]@ != Self::sentinel_log() ==>
+                        self.tail@[i]@ < N_THREADS@ //&& self.next_idxs@[self.tail@[i]@]@ != Self::sentinel_log()
+                    && forall<i: Int> 0 <= i && i < self.next_idxs@.len() && self.next_idxs@[i]@ != Self::sentinel_log() ==>
+                        self.next_idxs@[i]@ < N_THREADS@
             }
         }
     }
@@ -599,7 +641,6 @@ mod clist {
     use creusot_contracts::prelude::*;
 
     impl<const N_QUEUES: usize, const N_THREADS: usize> CList<N_QUEUES, N_THREADS> {
-
         #[logic(open(super))]
         pub fn valid_rq_id(id: Int) -> bool {
             pearlite! {
@@ -611,6 +652,15 @@ mod clist {
         pub fn valid_th_id(id: Int) -> bool {
             pearlite! {
                 super::bounded(id, 0, N_THREADS@)
+                    && id != Self::sentinel_log()
+            }
+        }
+
+        #[logic(open(super))]
+        pub fn valid_rq(&self, id: Int) -> bool {
+            pearlite! {
+                Self::valid_rq_id(id)
+                    && self.tail@[id]@ != Self::sentinel_log()
             }
         }
 
@@ -634,11 +684,17 @@ mod clist {
             pearlite! { 0xFF }
         }
 
+        #[requires(Self::valid_rq_id(rq@))]
+        #[ensures(result == !self.valid_rq(rq@))]
+        #[ensures(result == (self.tail@[rq@]@ == Self::sentinel_log()))]
         pub fn is_empty(&self, rq: u8) -> bool {
             self.tail[rq as usize] == Self::sentinel()
         }
 
         #[expect(clippy::missing_panics_doc, reason = "internal")]
+        #[requires(n@ < Self::sentinel_log())]
+        #[requires(Self::valid_th_id(n@))]
+        #[requires(self.valid_rq(rq@))]
         pub fn push(&mut self, n: u8, rq: u8) {
             assert!(n < Self::sentinel());
             if self.next_idxs[n as usize] != Self::sentinel() {
@@ -664,6 +720,7 @@ mod clist {
         ///
         /// If the thread was the only thread in its runqueue, `Some` is returned
         /// with the ID of the now empty runqueue.
+        #[requires(Self::valid_th_id(n@))]
         #[ensures(
             match result {
                 Some(i) => Self::valid_rq_id(i@),
@@ -689,6 +746,7 @@ mod clist {
                     self.tail[rq] = prev as u8;
                 }
             }
+
             self.next_idxs[prev] = self.next_idxs[n as usize];
             self.next_idxs[n as usize] = Self::sentinel();
             empty_runqueue
@@ -698,7 +756,7 @@ mod clist {
         #[ensures(result == self.head(rq))]
         pub fn pop_head(&mut self, rq: u8) -> Option<u8> {
             let head = self.peek_head(rq)?;
-
+            // self.next_idxs[self.tail[rq as usize] as usize]
             if head == self.tail[rq as usize] {
                 // rq's tail bites itself, so there's only one entry.
                 // so, clear tail.
@@ -721,12 +779,19 @@ mod clist {
                 if self.tail[rq as usize]@ == Self::sentinel_log() {
                     None
                 } else {
-                    Some(self.next_idxs[self.tail[rq as usize] as usize])
+                    let res = self.next_idxs[self.tail[rq as usize] as usize];
+                    if res@ == Self::sentinel_log() {
+                        None
+                    } else {
+                        Some(res)
+                    }
+                    //Some(self.next_idxs[self.tail[rq as usize] as usize])
                 }
             }
         }
 
         #[inline]
+        #[requires(Self::valid_rq_id(rq@))]
         #[ensures(match result {
             Some(i) => Self::valid_th_id(i@),
             None    => true,
@@ -736,14 +801,22 @@ mod clist {
             if self.is_empty(rq) {
                 None
             } else {
-                Some(self.next_idxs[self.tail[rq as usize] as usize])
+                let res = self.next_idxs[self.tail[rq as usize] as usize];
+                if res == Self::sentinel() {
+                    None
+                } else {
+                    Some(res)
+                }
+                //Some(self.next_idxs[self.tail[rq as usize] as usize])
             }
         }
 
+        #[requires(Self::valid_th_id(curr@))]
         pub fn peek_next(&self, curr: u8) -> u8 {
             self.next_idxs[curr as usize]
         }
 
+        #[requires(self.valid_rq(rq@))]
         pub fn advance(&mut self, rq: u8) -> bool {
             let tail = self.tail[rq as usize];
             let head = self.next_idxs[tail as usize];
@@ -752,14 +825,23 @@ mod clist {
                 // or is empty (in which case head == tail == Self::sentinel())
                 return false;
             }
+
             self.tail[rq as usize] = head;
             true
         }
     }
 
     /// Helper function that is needed because hax doesn't support `Iterator::position` yet.
+    #[ensures(match result {
+        None =>
+            forall<i: Int> 0 <= i && i < N@ ==> slice@[i]@ != search_item@,
+        Some(i) =>
+            super::bounded(i@, 0, N@) && slice@[i@]@ == search_item@
+    })]
     fn position<const N: usize>(slice: &[u8; N], search_item: u8) -> Option<usize> {
         let mut i = 0;
+
+        #[invariant(forall<j: Int> 0 <= j && j < i@ ==> slice@[j]@ != search_item@)]
         while i < N && slice[i] != search_item {
             i += 1;
         }
