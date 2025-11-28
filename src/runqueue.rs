@@ -195,6 +195,7 @@ pub struct RunQueue<const N_QUEUES: usize, const N_THREADS: usize> {
     queues: clist::CList<N_QUEUES, N_THREADS>,
 }
 
+#[cfg(not(creusot))]
 impl<const N_QUEUES: usize, const N_THREADS: usize> Default for RunQueue<N_QUEUES, N_THREADS> {
     fn default() -> Self {
         Self::new()
@@ -260,7 +261,8 @@ impl<const N_QUEUES: usize, const N_THREADS: usize> RunQueue<{ N_QUEUES }, { N_T
 
     /// Returns a new [`RunQueue`].
     #[must_use]
-    #[trusted]
+    #[requires(N_QUEUES@ < 64)]
+    #[requires(N_THREADS@ < 64)]
     pub const fn new() -> RunQueue<{ N_QUEUES }, { N_THREADS }> {
         // unfortunately we cannot assert!() on N_QUEUES and N_THREADS,
         // as panics in const fn's are not (yet) implemented.
@@ -491,9 +493,7 @@ fn ffs(val: usize) -> u32 {
 
 #[logic]
 fn valid_cache(bitcache: usize, n_queues: usize) -> bool {
-    pearlite! {
-        (bitcache >> n_queues) == 0usize
-    }
+    bitcache == 0usize || (bitcache >> (n_queues - 1usize)) == 0usize
 }
 
 #[logic]
@@ -632,6 +632,7 @@ mod clist {
         }
     }
 
+    #[cfg(not(creusot))]
     impl<const N_QUEUES: usize, const N_THREADS: usize> Default for CList<N_QUEUES, N_THREADS> {
         fn default() -> Self {
             Self::new()
@@ -664,7 +665,8 @@ mod clist {
             }
         }
 
-        #[trusted]
+        #[requires(N_QUEUES@ < 255)]
+        #[requires(N_THREADS@ < 255)]
         pub const fn new() -> Self {
             // TODO: ensure N fits in u8
             // assert!(N<255); is not allowed in const because it could panic
