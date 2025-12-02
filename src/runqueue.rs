@@ -195,6 +195,8 @@ pub struct RunQueue<const N_QUEUES: usize, const N_THREADS: usize> {
 
 #[cfg(not(creusot))]
 impl<const N_QUEUES: usize, const N_THREADS: usize> Default for RunQueue<N_QUEUES, N_THREADS> {
+    #[requires(N_QUEUES@ < 64)]
+    #[requires(N_THREADS@ < 64)]
     fn default() -> Self {
         Self::new()
     }
