@@ -64,7 +64,6 @@ impl From<RunqueueId> for usize {
 impl DeepModel for RunqueueId {
     type DeepModelTy = Int;
     #[logic]
-    #[trusted]
     fn deep_model(self) -> Self::DeepModelTy {
         self.0.deep_model()
     }
@@ -158,7 +157,6 @@ impl From<ThreadId> for usize {
 impl DeepModel for ThreadId {
     type DeepModelTy = Int;
     #[logic]
-    #[trusted]
     fn deep_model(self) -> Self::DeepModelTy {
         pearlite! { self.0@ }
     }
